@@ -4,13 +4,58 @@ import pyperclip
 import json
 from cryptography.fernet import Fernet
 from getpass import getpass
+from dotenv import load_dotenv
 
-VERSION = '1.0'
+# COMMAND_TO_CREATE_EXE = 'pyinstaller -F -n pm --distpath . password_manager.py'
 
-def reset():
+VERSION = '2.1'
+
+def get_path():
+    """ Get path (directory) of the current exe """
+    for p in os.environ['path'].split(';'):
+        if os.path.exists(os.path.join(p, 'pm.exe')):
+            return p
+
+def setup():
+    """ Setup the application by setting and loading environment variables """
+    path = os.path.join(get_path(), 'pm.env ')
+    if os.path.exists(path):
+        load_dotenv(path)
+        return True
+    master_password = input('Set Master Password: ')
+    with open(path, 'w') as env_file:
+        env_file.write(f'MASTER_PASSWORD={master_password}\n')
+        key = Fernet.generate_key() #this is your "password"
+        env_file.write(f'SECRET_KEY={key.decode()}\n')
+        env_file.write(f'DEST={os.path.join(get_path(), "pm")}')
+    return False
+
+def reset_password(new_password):
+    """ Reset the Master password """
+    try: 
+        if new_password is None:
+            new_password = input('New Master Password: ')
+        else:
+            new_password = new_password[0]
+
+        path = os.path.join(get_path(), 'pm.env ')
+
+        with open(path, 'r') as env_file:
+            new_env = f'MASTER_PASSWORD={new_password}\n'
+            new_env += ''.join(env_file.readlines()[1:])
+
+        with open(path, 'w') as env_file:
+            env_file.write(new_env)
+
+        return True
+    except Exception as e:
+        print(e)
+        return False
+
+def clear():
     """ Delets all existing records """
     try:
-        os.remove(r'D:\utills\passwords.txt')
+        os.remove(os.environ.get('DEST'))
         return True 
     except Exception as e:
         return False
@@ -22,7 +67,7 @@ def load_passwords():
         A dictionary from {account}-{username/main} -> {password}
     """
     try:
-        with open(r'D:\utills\passwords.txt', 'rb') as file:
+        with open(os.environ.get('DEST'), 'rb') as file:
             decoded_text = cipher_suite.decrypt(file.read())
             passwords_loaded = json.loads(decoded_text) 
 
@@ -44,14 +89,14 @@ def encrypt_and_save(passwords):
         
         encoded_text = cipher_suite.encrypt(passwords)
         
-        with open(r'D:\utills\passwords.txt', 'wb') as pwfile:
+        with open(os.environ.get('DEST'), 'wb') as pwfile:
             pwfile.write(encoded_text)
         
         return True
     except Exception as e:
         return False
 
-def get_all(passwords_loaded):
+def display(passwords_loaded):
     """ Get all saved passwords
     Args:
         passwords_loaded: dictionary loaded from file containing the records of all accounts and passwords
@@ -65,7 +110,7 @@ def get_all(passwords_loaded):
         print(f'| {acc[:idx]:25} | {acc[idx+1:]:25} | {len(password) * "*":25} |')
     print('-' * 85)
 
-def save_new(passwords_loaded, account, username, password):
+def save(passwords_loaded, account, username, password):
     """ 
         Adds the new {account}-{username}->{password} entry to passwords loaded
     Args: 
@@ -145,14 +190,19 @@ def process_args(args, master_password, passwords_loaded):
     
     if password == master_password:
         if args.reset:
-            if reset():
+            if reset_password(args.password):
                 print('Reset Success')
             else:
                 print('Reset Error')
-        elif args.get_all:
-            get_all(passwords_loaded)
+        elif args.clear:
+            if clear():
+                print('Clear Success')
+            else:
+                print('clear Error')
+        elif args.display:
+            display(passwords_loaded)
         elif args.save:
-            save_new(passwords_loaded, args.account, args.username, args.password)
+            save(passwords_loaded, args.account, args.username, args.password)
         else:
             get_password(passwords_loaded, args.account, args.username)
     else:
@@ -170,10 +220,6 @@ def main():
     """
     master_password = os.environ.get('MASTER_PASSWORD')
 
-    if master_password is None:
-        print(f'error: "MASTER_PASSWORD" environment variable not set.')
-        exit(1)
-        
     passwords_loaded = load_passwords()
 
     parser = argparse.ArgumentParser(description='My Password manager') 
@@ -193,11 +239,14 @@ def main():
     parser.add_argument('-s', '--save', action='store_true',
                         default = None, help = 'Save new password') 
 
-    parser.add_argument('-g', '--get_all', action='store_true',
-                        default = None, help = 'Get all saved passwords') 
+    parser.add_argument('-d', '--display', action='store_true',
+                        default = None, help = 'Display all saved passwords') 
+
+    parser.add_argument('-c', '--clear', action='store_true',
+                        default = None, help = 'Clear the application (Delete all entries)') 
 
     parser.add_argument('-r', '--reset', action='store_true',
-                        default = None, help = 'Reset the application (Delete all entries)') 
+                        default = None, help = "Reset the application's Master Password") 
 
     parser.add_argument('-v', '--version', action='store_true',
                         default = None, help = 'Version') 
@@ -207,9 +256,11 @@ def main():
     process_args(args, master_password, passwords_loaded)
 
 if __name__ == "__main__": 
-    # Global variables for encription and decription
-    key = str.encode(os.environ.get('MASTER_SECRET_KEY'))
-    cipher_suite = Fernet(key)
+    # Setup the application
+    if setup():
+        # Global variables for encription and decription
+        key = str.encode(os.environ.get('SECRET_KEY'))
+        cipher_suite = Fernet(key)
 
-    # Run the application
-    main()
+        # Run the application
+        main()
